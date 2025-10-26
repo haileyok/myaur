@@ -1,0 +1,5 @@
+# default path for aur clone
+aur-mirror/
+# default path for db
+myaur.db
+myaur.db-journal
