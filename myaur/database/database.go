@@ -98,3 +98,11 @@ func (db *Database) GetPackagesByDescriptionOrName(query string) ([]PackageInfo,
 	}
 	return pkgs, nil
 }
+
+func (db *Database) GetPackagesByNames(names []string) ([]PackageInfo, error) {
+	var pkgs []PackageInfo
+	if err := db.db.Where("name IN ?", names).Find(&pkgs).Error; err != nil {
+		return nil, err
+	}
+	return pkgs, nil
+}

@@ -21,9 +21,14 @@ func (s *StringSlice) Scan(value any) error {
 		return nil
 	}
 
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("failed to unmarshal StringSlice value: %v", value)
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to unmarshal StringSlice value: %v (type: %T)", value, value)
 	}
 
 	return json.Unmarshal(bytes, s)
@@ -32,7 +37,7 @@ func (s *StringSlice) Scan(value any) error {
 type PackageInfo struct {
 	Id             int64       `gorm:"primaryKey;autoIncrement" json:"ID"`
 	Name           string      `gorm:"uniqueIndex;not null" json:"Name"`
-	PackageBaseID  string      `json:"PackageBaseID"`
+	PackageBaseID  int64       `json:"PackageBaseID"`
 	PackageBase    string      `gorm:"index" json:"PackageBase"`
 	Version        string      `json:"Version"`
 	Description    string      `gorm:"index:idx_description" json:"Description"`

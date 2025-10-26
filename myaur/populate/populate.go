@@ -22,10 +22,11 @@ type Populate struct {
 }
 
 type Args struct {
-	DatabasePath string
-	RepoPath     string
-	Debug        bool
-	Concurrency  int
+	DatabasePath  string
+	RepoPath      string
+	RemoteRepoUrl string
+	Debug         bool
+	Concurrency   int
 }
 
 func New(args *Args) (*Populate, error) {
@@ -46,8 +47,9 @@ func New(args *Args) (*Populate, error) {
 	}
 
 	repo, err := gitrepo.New(&gitrepo.Args{
-		RepoPath: args.RepoPath,
-		Debug:    args.Debug,
+		RepoPath:   args.RepoPath,
+		AurRepoUrl: args.RemoteRepoUrl,
+		Debug:      args.Debug,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create repo client: %w", err)

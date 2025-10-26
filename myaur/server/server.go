@@ -11,23 +11,30 @@ import (
 	"time"
 
 	"github.com/haileyok/myaur/myaur/database"
+	"github.com/haileyok/myaur/myaur/gitrepo"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
+	slogecho "github.com/samber/slog-echo"
 )
 
 type Server struct {
-	logger       *slog.Logger
-	echo         *echo.Echo
-	httpd        *http.Server
-	metricsHttpd *http.Server
-	db           *database.Database
+	logger        *slog.Logger
+	echo          *echo.Echo
+	httpd         *http.Server
+	metricsHttpd  *http.Server
+	db            *database.Database
+	remoteRepoUrl string
+	repoPath      string
 }
 
 type Args struct {
-	Addr         string
-	MetricsAddr  string
-	DatabasePath string
-	Debug        bool
+	Addr          string
+	MetricsAddr   string
+	DatabasePath  string
+	RemoteRepoUrl string
+	RepoPath      string
+	Debug         bool
 }
 
 func New(args *Args) (*Server, error) {
@@ -36,11 +43,18 @@ func New(args *Args) (*Server, error) {
 		level = slog.LevelDebug
 	}
 
+	if args.RemoteRepoUrl == "" {
+		args.RemoteRepoUrl = gitrepo.DefaultAurRepoUrl
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
 	}))
 
 	e := echo.New()
+
+	e.Use(middleware.Recover())
+	e.Use(slogecho.New(logger))
 
 	httpd := http.Server{
 		Addr:    args.Addr,
@@ -60,11 +74,13 @@ func New(args *Args) (*Server, error) {
 	}
 
 	s := Server{
-		echo:         e,
-		httpd:        &httpd,
-		metricsHttpd: &metricsHttpd,
-		db:           db,
-		logger:       logger,
+		echo:          e,
+		httpd:         &httpd,
+		metricsHttpd:  &metricsHttpd,
+		db:            db,
+		logger:        logger,
+		remoteRepoUrl: args.RemoteRepoUrl,
+		repoPath:      args.RepoPath,
 	}
 
 	return &s, nil
@@ -148,16 +164,11 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) addRoutes() {
+	s.echo.GET("/rpc", s.handleRpc)
 	s.echo.GET("/rpc/v5/info", s.handleGetInfo)
-	s.echo.GET("/rpc/v5/search", s.handleGetSearch)
-}
+	s.echo.GET("/rpc/v5/search/:term", s.handleGetSearch)
 
-func makeErrorJson(error string, message string) map[string]string {
-	jsonMap := map[string]string{
-		"error": error,
-	}
-	if message != "" {
-		jsonMap["message"] = message
-	}
-	return jsonMap
+	// git will make both get and post requests
+	s.echo.GET("/*", s.handleGit)
+	s.echo.POST("/*", s.handleGit)
 }

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"strings"
-
 	"github.com/haileyok/myaur/myaur/database"
 	"github.com/labstack/echo/v4"
 )
@@ -31,6 +29,16 @@ type GetSearchOutput struct {
 	Error       *string                `json:"error,omitempty"`
 }
 
+func makeErrJson(error string) GetSearchOutput {
+	return GetSearchOutput{
+		Version:     5,
+		Type:        "error",
+		ResultCount: 0,
+		Results:     []database.PackageInfo{},
+		Error:       &error,
+	}
+}
+
 // Depending on what the `by` parameter is, should receive one of the following as path:
 // `name`: search by package name
 // `name-desc`: search by package name and description
@@ -40,15 +48,6 @@ type GetSearchOutput struct {
 // `optdepends`: search for packages that optdepends on a keyword
 // `checkdepends`: search for packages that checkdepends on a keyword
 func (s *Server) handleGetSearch(e echo.Context) error {
-	makeErrJson := func(error string) GetSearchOutput {
-		return GetSearchOutput{
-			Version:     5,
-			Type:        "error",
-			ResultCount: 0,
-			Results:     []database.PackageInfo{},
-			Error:       &error,
-		}
-	}
 	logger := s.logger.With("handler", "getSearch")
 
 	var input GetSearchInput
@@ -68,8 +67,7 @@ func (s *Server) handleGetSearch(e echo.Context) error {
 		input.By = "name"
 	}
 
-	termPts := strings.Split(e.Request().URL.Path, "/")
-	term := termPts[len(termPts)-1]
+	term := e.Param("term")
 
 	var pkgs []database.PackageInfo
 	var err error
