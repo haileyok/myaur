@@ -9,6 +9,7 @@ import (
 	"github.com/haileyok/myaur/myaur/gitrepo"
 	"github.com/haileyok/myaur/myaur/populate"
 	"github.com/haileyok/myaur/myaur/server"
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/urfave/cli/v2"
 )
 

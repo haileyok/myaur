@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  myaur:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: myaur
+    network_mode: host
+    volumes:
+      - myaur-data:/app/data
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    depends_on:
+      - myaur
+
+volumes:
+  myaur-data:
+  caddy-data:
+  caddy-config:

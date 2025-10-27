@@ -120,7 +120,11 @@ func (p *Populate) processBranches(ctx context.Context, branches []string) error
 			}
 			processed.Add(1)
 
-			logger.Info("progress", "processed", processed.Load(), "succeeded", succeeded.Load(), "failed", failed.Load(), "total", len(branches))
+			processed := processed.Load()
+			if processed%500 == 0 {
+				logger.Info("progress", "processed", processed, "succeeded", succeeded.Load(), "failed", failed.Load(), "total", len(branches))
+			}
+			logger.Debug("progress", "processed", processed, "succeeded", succeeded.Load(), "failed", failed.Load(), "total", len(branches))
 		}()
 	}
 

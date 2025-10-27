@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/haileyok/myaur/myaur/database"
 	"github.com/haileyok/myaur/myaur/gitrepo"
+	"github.com/haileyok/myaur/myaur/populate"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
@@ -24,6 +26,7 @@ type Server struct {
 	httpd         *http.Server
 	metricsHttpd  *http.Server
 	db            *database.Database
+	populator     *populate.Populate
 	remoteRepoUrl string
 	repoPath      string
 }
@@ -73,11 +76,20 @@ func New(args *Args) (*Server, error) {
 		return nil, fmt.Errorf("failed to create new database client: %w", err)
 	}
 
+	populator, err := populate.New(&populate.Args{
+		DatabasePath:  args.DatabasePath,
+		RepoPath:      args.RepoPath,
+		RemoteRepoUrl: args.RemoteRepoUrl,
+		Debug:         args.Debug,
+		Concurrency:   20, // TODO: make an env-var for this
+	})
+
 	s := Server{
 		echo:          e,
 		httpd:         &httpd,
 		metricsHttpd:  &metricsHttpd,
 		db:            db,
+		populator:     populator,
 		logger:        logger,
 		remoteRepoUrl: args.RemoteRepoUrl,
 		repoPath:      args.RepoPath,
@@ -97,6 +109,34 @@ func (s *Server) Serve(ctx context.Context) error {
 		}()
 
 		logger.Info("myaur metrics server listening", "addr", s.metricsHttpd.Addr)
+	}()
+
+	shutdownTicker := make(chan struct{})
+	tickerShutdown := make(chan struct{})
+	go func() {
+		logger := s.logger.With("component", "update-routine")
+
+		ticker := time.NewTicker(1 * time.Hour)
+
+		go func() {
+			logger.Info("performing initial database population")
+
+			if err := s.populator.Run(ctx); err != nil {
+				logger.Info("error populating", "err", err)
+			}
+
+			for range ticker.C {
+				if err := s.populator.Run(ctx); err != nil {
+					logger.Info("error populating", "err", err)
+				}
+			}
+
+			close(tickerShutdown)
+		}()
+
+		<-shutdownTicker
+
+		ticker.Stop()
 	}()
 
 	shutdownEcho := make(chan struct{})
@@ -151,12 +191,40 @@ func (s *Server) Serve(ctx context.Context) error {
 		// echo should have already been closed
 	}
 
-	select {
-	case <-echoShutdown:
-		s.logger.Info("echo shutdown gracefully")
-	case <-time.After(5 * time.Second):
-		s.logger.Warn("echo did not shut down after five seconds. forcefully exiting.")
-	}
+	close(shutdownTicker)
+
+	s.logger.Info("send ctrl+c to forcefully shutdown without waiting for routines to finish")
+
+	forceShutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(forceShutdownSignals, syscall.SIGINT, syscall.SIGTERM)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		s.logger.Info("waiting up to 5 seconds for echo to shut down")
+		select {
+		case <-echoShutdown:
+			s.logger.Info("echo shutdown gracefully")
+		case <-time.After(5 * time.Second):
+			s.logger.Warn("echo did not shut down after five seconds. forcefully exiting.")
+		case <-forceShutdownSignals:
+			s.logger.Warn("received forceful shutdown signal before echo shut down")
+		}
+	})
+
+	wg.Go(func() {
+		s.logger.Info("waiting up to 60 seconds for ticker to shut down")
+		select {
+		case <-tickerShutdown:
+			s.logger.Info("ticker shutdown gracefully")
+		case <-time.After(60 * time.Second):
+			s.logger.Warn("waited 60 seconds for ticker to shut down. forcefully exiting.")
+		case <-forceShutdownSignals:
+			s.logger.Warn("received forceful shutdown signal before ticker shut down")
+		}
+	})
+
+	s.logger.Info("waiting for routines to finish")
+	wg.Wait()
 
 	s.logger.Info("myaur shutdown")
 

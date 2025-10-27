@@ -1,0 +1,10 @@
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore
+aur-mirror
+myaur.db
+*.db
+*.db-shm
+*.db-wal

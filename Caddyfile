@@ -1,0 +1,26 @@
+# Replace with your actual domain name
+# For local development, you can use localhost
+:80 {
+    # Redirect to HTTPS
+    redir https://{host}{uri} permanent
+}
+
+# Main application
+:443 {
+    # Automatic HTTPS with self-signed cert (for localhost)
+    # For production, replace with your domain and Caddy will get a Let's Encrypt cert
+    # Example: myaur.example.com
+
+    # Reverse proxy to myaur application
+    reverse_proxy localhost:8080
+
+    # Enable logging
+    log {
+        output file /var/log/caddy/access.log
+    }
+}
+
+# Metrics endpoint (optional - uncomment if you want metrics exposed)
+# :8081 {
+#     reverse_proxy localhost:8081
+# }
