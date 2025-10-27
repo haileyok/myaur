@@ -236,6 +236,10 @@ func (s *Server) addRoutes() {
 	s.echo.GET("/rpc/v5/info", s.handleGetInfo)
 	s.echo.GET("/rpc/v5/search/:term", s.handleGetSearch)
 
+	s.echo.GET("/", func(e echo.Context) error {
+		return e.String(200, "an AUR mirror. code at https://github.com/haileyok/myaur")
+	})
+
 	// git will make both get and post requests
 	s.echo.GET("/*", s.handleGit)
 	s.echo.POST("/*", s.handleGit)
