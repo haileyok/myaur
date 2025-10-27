@@ -21,23 +21,26 @@ import (
 )
 
 type Server struct {
-	logger        *slog.Logger
-	echo          *echo.Echo
-	httpd         *http.Server
-	metricsHttpd  *http.Server
-	db            *database.Database
-	populator     *populate.Populate
-	remoteRepoUrl string
-	repoPath      string
+	logger         *slog.Logger
+	echo           *echo.Echo
+	httpd          *http.Server
+	db             *database.Database
+	populator      *populate.Populate
+	remoteRepoUrl  string
+	repoPath       string
+	autoUpdate     bool
+	updateInterval time.Duration
 }
 
 type Args struct {
-	Addr          string
-	MetricsAddr   string
-	DatabasePath  string
-	RemoteRepoUrl string
-	RepoPath      string
-	Debug         bool
+	Addr           string
+	DatabasePath   string
+	RemoteRepoUrl  string
+	RepoPath       string
+	Concurrency    int
+	AutoUpdate     bool
+	UpdateInterval time.Duration
+	Debug          bool
 }
 
 func New(args *Args) (*Server, error) {
@@ -64,10 +67,6 @@ func New(args *Args) (*Server, error) {
 		Handler: e,
 	}
 
-	metricsHttpd := http.Server{
-		Addr: args.MetricsAddr,
-	}
-
 	db, err := database.New(&database.Args{
 		DatabasePath: args.DatabasePath,
 		Debug:        args.Debug,
@@ -81,63 +80,54 @@ func New(args *Args) (*Server, error) {
 		RepoPath:      args.RepoPath,
 		RemoteRepoUrl: args.RemoteRepoUrl,
 		Debug:         args.Debug,
-		Concurrency:   20, // TODO: make an env-var for this
+		Concurrency:   args.Concurrency,
 	})
 
 	s := Server{
-		echo:          e,
-		httpd:         &httpd,
-		metricsHttpd:  &metricsHttpd,
-		db:            db,
-		populator:     populator,
-		logger:        logger,
-		remoteRepoUrl: args.RemoteRepoUrl,
-		repoPath:      args.RepoPath,
+		echo:           e,
+		httpd:          &httpd,
+		db:             db,
+		populator:      populator,
+		logger:         logger,
+		remoteRepoUrl:  args.RemoteRepoUrl,
+		repoPath:       args.RepoPath,
+		autoUpdate:     args.AutoUpdate,
+		updateInterval: args.UpdateInterval,
 	}
 
 	return &s, nil
 }
 
 func (s *Server) Serve(ctx context.Context) error {
-	go func() {
-		logger := s.logger.With("component", "metrics-httpd")
-
-		go func() {
-			if err := s.metricsHttpd.ListenAndServe(); err != http.ErrServerClosed {
-				logger.Error("error listening", "err", err)
-			}
-		}()
-
-		logger.Info("myaur metrics server listening", "addr", s.metricsHttpd.Addr)
-	}()
-
 	shutdownTicker := make(chan struct{})
 	tickerShutdown := make(chan struct{})
-	go func() {
-		logger := s.logger.With("component", "update-routine")
-
-		ticker := time.NewTicker(1 * time.Hour)
-
+	if s.autoUpdate {
 		go func() {
-			logger.Info("performing initial database population")
+			logger := s.logger.With("component", "update-routine")
 
-			if err := s.populator.Run(ctx); err != nil {
-				logger.Info("error populating", "err", err)
-			}
+			ticker := time.NewTicker(s.updateInterval)
 
-			for range ticker.C {
+			go func() {
+				logger.Info("performing initial database population")
+
 				if err := s.populator.Run(ctx); err != nil {
 					logger.Info("error populating", "err", err)
 				}
-			}
 
-			close(tickerShutdown)
+				for range ticker.C {
+					if err := s.populator.Run(ctx); err != nil {
+						logger.Info("error populating", "err", err)
+					}
+				}
+
+				close(tickerShutdown)
+			}()
+
+			<-shutdownTicker
+
+			ticker.Stop()
 		}()
-
-		<-shutdownTicker
-
-		ticker.Stop()
-	}()
+	}
 
 	shutdownEcho := make(chan struct{})
 	echoShutdown := make(chan struct{})
@@ -191,7 +181,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		// echo should have already been closed
 	}
 
-	close(shutdownTicker)
+	if s.autoUpdate {
+		close(shutdownTicker)
+	}
 
 	s.logger.Info("send ctrl+c to forcefully shutdown without waiting for routines to finish")
 
@@ -211,17 +203,19 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	})
 
-	wg.Go(func() {
-		s.logger.Info("waiting up to 60 seconds for ticker to shut down")
-		select {
-		case <-tickerShutdown:
-			s.logger.Info("ticker shutdown gracefully")
-		case <-time.After(60 * time.Second):
-			s.logger.Warn("waited 60 seconds for ticker to shut down. forcefully exiting.")
-		case <-forceShutdownSignals:
-			s.logger.Warn("received forceful shutdown signal before ticker shut down")
-		}
-	})
+	if s.autoUpdate {
+		wg.Go(func() {
+			s.logger.Info("waiting up to 60 seconds for ticker to shut down")
+			select {
+			case <-tickerShutdown:
+				s.logger.Info("ticker shutdown gracefully")
+			case <-time.After(60 * time.Second):
+				s.logger.Warn("waited 60 seconds for ticker to shut down. forcefully exiting.")
+			case <-forceShutdownSignals:
+				s.logger.Warn("received forceful shutdown signal before ticker shut down")
+			}
+		})
+	}
 
 	s.logger.Info("waiting for routines to finish")
 	wg.Wait()

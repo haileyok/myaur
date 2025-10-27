@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/haileyok/myaur/myaur/gitrepo"
 	"github.com/haileyok/myaur/myaur/populate"
@@ -43,7 +44,7 @@ func main() {
 					&cli.IntFlag{
 						Name:  "concurrency",
 						Usage: "worker concurrency for parsing and adding packages to database",
-						Value: 10, // TODO: is this a good default
+						Value: 10,
 					},
 				},
 				Action: func(cmd *cli.Context) error {
@@ -99,17 +100,34 @@ func main() {
 						Name:  "debug",
 						Usage: "flag to enable debug logs",
 					},
+					&cli.IntFlag{
+						Name:  "concurrency",
+						Usage: "worker concurrency for parsing and adding packages to database",
+						Value: 10,
+					},
+					&cli.BoolFlag{
+						Name:  "auto-update",
+						Usage: "automatically pull updates from the remote repo at the set interval",
+						Value: true,
+					},
+					&cli.DurationFlag{
+						Name:  "update-interval",
+						Usage: "the interval at which updates will be fetched. note that this should likely be at most one hour.",
+						Value: time.Hour,
+					},
 				},
 				Action: func(cmd *cli.Context) error {
 					ctx := context.Background()
 
 					s, err := server.New(&server.Args{
-						Addr:          cmd.String("listen-addr"),
-						MetricsAddr:   cmd.String("metrics-listen-addr"),
-						DatabasePath:  cmd.String("database-path"),
-						RemoteRepoUrl: cmd.String("remote-repo-url"),
-						RepoPath:      cmd.String("repo-path"),
-						Debug:         cmd.Bool("debug"),
+						Addr:           cmd.String("listen-addr"),
+						DatabasePath:   cmd.String("database-path"),
+						RemoteRepoUrl:  cmd.String("remote-repo-url"),
+						RepoPath:       cmd.String("repo-path"),
+						Concurrency:    cmd.Int("concurrency"),
+						AutoUpdate:     cmd.Bool("auto-update"),
+						UpdateInterval: cmd.Duration("update-interval"),
+						Debug:          cmd.Bool("debug"),
 					})
 					if err != nil {
 						return fmt.Errorf("failed to create new myaur server: %w", err)
